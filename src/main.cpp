@@ -51,7 +51,7 @@ const int FULL_MV  = 3100;        // mV measured at full
 #define RX_UUID      "7a1e0002-5b1d-4f6a-9c53-6d2f0a9b1e01"   // phone -> board (text lines)
 #define TX_UUID      "7a1e0003-5b1d-4f6a-9c53-6d2f0a9b1e01"   // board -> phone (commands)
 #define OTA_UUID     "7a1e0004-5b1d-4f6a-9c53-6d2f0a9b1e01"   // phone -> board (firmware bytes)
-#define FW_VERSION   "1.1.0"
+#define FW_VERSION   "1.2.0"
 
 // ---- Layout: emulates a ROUND screen on the rectangular test display ----
 // Round screen = circle of diameter 170 centred at (160,85).
@@ -74,8 +74,9 @@ const int           MARQUEE_SPEED = 30;   // pixels per second
 const uint16_t C_BG     = 0x0000;
 const uint16_t C_DIM    = 0x2965;
 const uint16_t C_GREY   = 0xBDF7;
-const uint16_t C_ACCENT = 0x065F;
-const uint16_t C_NEEDLE = 0xFD20;
+uint16_t C_ACCENT = 0x065F;     // changed by the app's theme
+uint16_t C_NEEDLE = 0xFD20;
+int needleStyle = NEEDLE_STYLE;  // 0 wedge, 1 slim, 2 classic
 
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);    // frame buffer
@@ -388,6 +389,19 @@ void handleMessage(const String &m) {
     }
     return;
   }
+  if (m.startsWith("CFG:THEME:")) {                // CFG:THEME:<style>:<accent565>:<needle565>
+    int p1 = m.indexOf(':', 10);
+    int p2 = (p1 > 0) ? m.indexOf(':', p1 + 1) : -1;
+    if (p1 > 0 && p2 > 0) {
+      needleStyle = constrain((int)m.substring(10, p1).toInt(), 0, 2);
+      C_ACCENT = (uint16_t)strtol(m.substring(p1 + 1, p2).c_str(), nullptr, 16);
+      C_NEEDLE = (uint16_t)strtol(m.substring(p2 + 1).c_str(), nullptr, 16);
+      prefs.putInt("nstyle", needleStyle);
+      prefs.putUInt("cacc", C_ACCENT);
+      prefs.putUInt("cneed", C_NEEDLE);
+    }
+    return;
+  }
   if (m.startsWith("CFG:KMPP:")) {
     int v = m.substring(9).toInt();
     if (v == 0) {                                   // back to the estimate
@@ -575,12 +589,12 @@ void drawNeedle(float pct) {
   float a = pctToRad(pct), ca = cosf(a), sa = sinf(a);
   int tx = GCX + NEEDLE_LEN * ca, ty = GCY - NEEDLE_LEN * sa;
 
-#if NEEDLE_STYLE == 0
+if (needleStyle == 0) {
   drawWedge(GCX, GCY, ca, sa, NEEDLE_LEN, 3, 10, C_NEEDLE);
   spr.fillCircle(GCX, GCY, 6, TFT_WHITE);
   spr.fillCircle(GCX, GCY, 2, C_BG);
 
-#elif NEEDLE_STYLE == 1
+} else if (needleStyle == 1) {
   int bx = GCX - 8 * ca, by = GCY + 8 * sa;
   spr.drawLine(bx, by, tx, ty, C_ACCENT);
   spr.drawLine(bx + 1, by, tx + 1, ty, C_ACCENT);
@@ -589,7 +603,7 @@ void drawNeedle(float pct) {
   spr.fillCircle(GCX, GCY, 5, TFT_WHITE);
   spr.fillCircle(GCX, GCY, 2, C_BG);
 
-#else
+} else {
   // Classic: soft shadow, tapered body with a light stripe, round counterweight, chrome hub
   drawWedge(GCX + 2, GCY + 2, ca, sa, NEEDLE_LEN, 4, 12, 0x2104);       // shadow
   drawWedge(GCX, GCY, ca, sa, NEEDLE_LEN, 4, 12, C_NEEDLE);             // body
@@ -599,7 +613,7 @@ void drawNeedle(float pct) {
   spr.fillCircle(GCX, GCY, 8, TFT_LIGHTGREY);                            // chrome ring
   spr.fillCircle(GCX, GCY, 6, 0x2104);
   spr.fillCircle(GCX, GCY, 3, C_NEEDLE);
-#endif
+}
 }
 
 // ---------- Bottom half: text, scrolling titles, slide transition ----------
@@ -998,13 +1012,13 @@ void drawBatteryIcon(int x, int y) {
 void drawOtaArc() {
   int pct = otaTotal ? (int)(otaWritten * 100 / otaTotal) : 0;
   const int R = 82;
-  for (float a = 40; a <= 140; a += 0.5f) {                // track, 100 degrees wide
+  for (float a = 60; a <= 120; a += 0.5f) {                // track, 60 degrees wide
     float r = a * DEG_TO_RAD;
     spr.fillCircle(GCX + (int)lroundf(R * cosf(r)), GCY + (int)lroundf(R * sinf(r)), 2, C_DIM);
   }
-  float filled = (float)pct;                               // 1 degree per percent
+  float filled = pct * 0.6f;                               // 60 degrees = 100 percent
   for (float d = 0; d <= filled; d += 0.5f) {              // progress, same thickness
-    float r = (140 - d) * DEG_TO_RAD;
+    float r = (120 - d) * DEG_TO_RAD;
     spr.fillCircle(GCX + (int)lroundf(R * cosf(r)), GCY + (int)lroundf(R * sinf(r)), 2, C_ACCENT);
   }
 }
@@ -1129,6 +1143,9 @@ void setup() {
   battFitted = prefs.getBool("batt", false);
   setupDone = prefs.getBool("setup", false);
   showBattIcon = prefs.getBool("baticon", true);
+  needleStyle = prefs.getInt("nstyle", NEEDLE_STYLE);
+  C_ACCENT = (uint16_t)prefs.getUInt("cacc", C_ACCENT);
+  C_NEEDLE = (uint16_t)prefs.getUInt("cneed", C_NEEDLE);
   kmPerPercent = prefs.getFloat("kmpp", kmPerPercent);
   backlightDuty = prefs.getInt("brt", BACKLIGHT_DUTY);
   savedBrt = backlightDuty;
