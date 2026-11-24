@@ -268,6 +268,32 @@ class OtaCB : public NimBLECharacteristicCallbacks {
   }
 };
 
+// Backlight PWM: the LEDC calls changed between Arduino core 2.x and 3.x
+void backlightBegin() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttach(DISPLAY_BL, 5000, 8);
+#else
+  ledcSetup(0, 5000, 8);
+  ledcAttachPin(DISPLAY_BL, 0);
+#endif
+}
+
+void backlightWrite(int duty) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(DISPLAY_BL, duty);
+#else
+  ledcWrite(0, duty);
+#endif
+}
+
+void backlightEnd() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcDetach(DISPLAY_BL);
+#else
+  ledcDetachPin(DISPLAY_BL);
+#endif
+}
+
 void startBle() {
   NimBLEDevice::init("Vespa Dash");
   NimBLEDevice::setMTU(185);
@@ -416,7 +442,7 @@ void handleMessage(const String &m) {
   if (m.startsWith("CFG:BRT:")) {
     int v = constrain((int)m.substring(8).toInt(), 10, 255);
     backlightDuty = v;
-    ledcWrite(0, v);
+    backlightWrite(v);
     if (abs(v - savedBrt) >= 20) { savedBrt = v; prefs.putInt("brt", v); }
     return;
   }
@@ -1063,7 +1089,7 @@ void powerOff() {
   // Screen and backlight off
   tft.writecommand(0x28);                           // display off
   tft.writecommand(0x10);                           // sleep in
-  ledcDetachPin(DISPLAY_BL);
+  backlightEnd();
   pinMode(DISPLAY_BL, OUTPUT);
   digitalWrite(DISPLAY_BL, LOW);
 
@@ -1159,9 +1185,8 @@ void setup() {
   tft.setRotation(1);               // landscape 320x170
   tft.fillScreen(TFT_BLACK);
 
-  ledcSetup(0, 5000, 8);                 // PWM backlight (after tft.init so it takes over the pin)
-  ledcAttachPin(DISPLAY_BL, 0);
-  ledcWrite(0, backlightDuty);
+  backlightBegin();                      // PWM backlight (after tft.init so it takes over the pin)
+  backlightWrite(backlightDuty);
 
   spr.setColorDepth(8);
   face.setColorDepth(8);
