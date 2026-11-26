@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <esp_system.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -51,7 +52,7 @@ const int FULL_MV  = 3100;        // mV measured at full
 #define RX_UUID      "7a1e0002-5b1d-4f6a-9c53-6d2f0a9b1e01"   // phone -> board (text lines)
 #define TX_UUID      "7a1e0003-5b1d-4f6a-9c53-6d2f0a9b1e01"   // board -> phone (commands)
 #define OTA_UUID     "7a1e0004-5b1d-4f6a-9c53-6d2f0a9b1e01"   // phone -> board (firmware bytes)
-#define FW_VERSION   "1.2.0"
+#define FW_VERSION   "1.3.0"
 
 // ---- Layout: emulates a ROUND screen on the rectangular test display ----
 // Round screen = circle of diameter 170 centred at (160,85).
@@ -74,9 +75,9 @@ const int           MARQUEE_SPEED = 30;   // pixels per second
 const uint16_t C_BG     = 0x0000;
 const uint16_t C_DIM    = 0x2965;
 const uint16_t C_GREY   = 0xBDF7;
-uint16_t C_ACCENT = 0x065F;     // changed by the app's theme
-uint16_t C_NEEDLE = 0xFD20;
-int needleStyle = NEEDLE_STYLE;  // 0 wedge, 1 slim, 2 classic
+const uint16_t C_ACCENT = 0x065F;
+const uint16_t C_NEEDLE = 0xFD20;
+const int needleStyle = NEEDLE_STYLE;  // 0 wedge, 1 slim, 2 classic
 
 TFT_eSPI tft;
 TFT_eSprite spr(&tft);    // frame buffer
@@ -135,6 +136,9 @@ uint8_t navIcon[128];                 // 32x32 maneuver icon, 1 bit per pixel
 uint8_t navIconNew[128];
 uint8_t navIconMask = 0;
 bool navHasIcon = false;
+
+// Diagnostics counters
+unsigned long diagRx = 0;
 
 // Firmware update over Bluetooth
 bool otaActive = false;
@@ -343,6 +347,15 @@ void otaFail(const char *why) {
   notifyRaw(b);
 }
 
+// Health report for the app's Diagnostics page
+void sendDiag() {
+  char b[128];
+  snprintf(b, sizeof(b), "DIAG:up=%lu,heap=%u,min=%u,rx=%lu,rst=%d,ota=%d",
+           millis() / 1000UL, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+           diagRx, (int)esp_reset_reason(), otaActive ? 1 : 0);
+  notifyRaw(b);
+}
+
 // Writes the received bytes to flash (the other app slot, so a failed update never breaks the dash)
 void otaService() {
   if (!otaActive) return;
@@ -393,6 +406,8 @@ void handleMessage(const String &m) {
     }
     return;
   }
+  diagRx++;
+  if (m == "DIAG?") { sendDiag(); return; }
   if (m.startsWith("OTA:")) {
     if (m.startsWith("OTA:BEGIN:")) {                // OTA:BEGIN:<size>:<md5>
       if (otaActive) Update.abort();
@@ -412,19 +427,6 @@ void handleMessage(const String &m) {
     } else if (m == "OTA:ABORT") {
       if (otaActive) Update.abort();
       otaActive = false;
-    }
-    return;
-  }
-  if (m.startsWith("CFG:THEME:")) {                // CFG:THEME:<style>:<accent565>:<needle565>
-    int p1 = m.indexOf(':', 10);
-    int p2 = (p1 > 0) ? m.indexOf(':', p1 + 1) : -1;
-    if (p1 > 0 && p2 > 0) {
-      needleStyle = constrain((int)m.substring(10, p1).toInt(), 0, 2);
-      C_ACCENT = (uint16_t)strtol(m.substring(p1 + 1, p2).c_str(), nullptr, 16);
-      C_NEEDLE = (uint16_t)strtol(m.substring(p2 + 1).c_str(), nullptr, 16);
-      prefs.putInt("nstyle", needleStyle);
-      prefs.putUInt("cacc", C_ACCENT);
-      prefs.putUInt("cneed", C_NEEDLE);
     }
     return;
   }
@@ -1169,9 +1171,6 @@ void setup() {
   battFitted = prefs.getBool("batt", false);
   setupDone = prefs.getBool("setup", false);
   showBattIcon = prefs.getBool("baticon", true);
-  needleStyle = prefs.getInt("nstyle", NEEDLE_STYLE);
-  C_ACCENT = (uint16_t)prefs.getUInt("cacc", C_ACCENT);
-  C_NEEDLE = (uint16_t)prefs.getUInt("cneed", C_NEEDLE);
   kmPerPercent = prefs.getFloat("kmpp", kmPerPercent);
   backlightDuty = prefs.getInt("brt", BACKLIGHT_DUTY);
   savedBrt = backlightDuty;
