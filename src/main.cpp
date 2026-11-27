@@ -408,6 +408,7 @@ void handleMessage(const String &m) {
   }
   diagRx++;
   if (m == "DIAG?") { sendDiag(); return; }
+  if (m == "FW?") { char fb[24]; snprintf(fb, sizeof(fb), "FW:%s", FW_VERSION); notifyRaw(fb); return; }
   if (m.startsWith("OTA:")) {
     if (m.startsWith("OTA:BEGIN:")) {                // OTA:BEGIN:<size>:<md5>
       if (otaActive) Update.abort();
