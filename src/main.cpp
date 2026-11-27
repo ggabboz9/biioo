@@ -52,7 +52,7 @@ const int FULL_MV  = 3100;        // mV measured at full
 #define RX_UUID      "7a1e0002-5b1d-4f6a-9c53-6d2f0a9b1e01"   // phone -> board (text lines)
 #define TX_UUID      "7a1e0003-5b1d-4f6a-9c53-6d2f0a9b1e01"   // board -> phone (commands)
 #define OTA_UUID     "7a1e0004-5b1d-4f6a-9c53-6d2f0a9b1e01"   // phone -> board (firmware bytes)
-#define FW_VERSION   "1.3.0"
+#define FW_VERSION   "1.3.1"
 
 // ---- Layout: emulates a ROUND screen on the rectangular test display ----
 // Round screen = circle of diameter 170 centred at (160,85).
@@ -1259,6 +1259,11 @@ void loop() {
     }
   }
 
+  // Settings and version: sent when the phone connects and again only when one of them changes
+  static int sentFit = -1, sentSetup = -1, sentIcon = -1;
+  static bool sentFw = false;
+  if (!phoneConnected) sentFw = false;
+
   // Tell the phone app the fuel level and range
   static unsigned long lastInfo = 0;
   if (phoneConnected && millis() - lastInfo > 2000) {
@@ -1268,14 +1273,14 @@ void loop() {
     notifyRaw(b);
     snprintf(b, sizeof(b), "RNG:%d", rangeKmInt());
     notifyRaw(b);
-    snprintf(b, sizeof(b), "BATFIT:%d", battFitted ? 1 : 0);
-    notifyRaw(b);
-    snprintf(b, sizeof(b), "SETUPDONE:%d", setupDone ? 1 : 0);
-    notifyRaw(b);
-    snprintf(b, sizeof(b), "BATICON:%d", showBattIcon ? 1 : 0);
-    notifyRaw(b);
-    snprintf(b, sizeof(b), "FW:%s", FW_VERSION);
-    notifyRaw(b);
+    int fit = battFitted ? 1 : 0, setup = setupDone ? 1 : 0, icon = showBattIcon ? 1 : 0;
+    if (!sentFw || fit != sentFit || setup != sentSetup || icon != sentIcon) {
+      sentFw = true; sentFit = fit; sentSetup = setup; sentIcon = icon;
+      snprintf(b, sizeof(b), "BATFIT:%d", fit);       notifyRaw(b);
+      snprintf(b, sizeof(b), "SETUPDONE:%d", setup);  notifyRaw(b);
+      snprintf(b, sizeof(b), "BATICON:%d", icon);     notifyRaw(b);
+      snprintf(b, sizeof(b), "FW:%s", FW_VERSION);    notifyRaw(b);
+    }
     if (batt.valid) {
       if (batt.present) snprintf(b, sizeof(b), "BAT:%d", batt.soc < 0 ? 0 : batt.soc);
       else              snprintf(b, sizeof(b), "BAT:NONE");
